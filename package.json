@@ -1,0 +1,13 @@
+{
+  "name": "sales-dashboard",
+  "private": true,
+  "description": "Root entry so Railway can build the backend from the repo root. Frontend deploys separately on Vercel (root: frontend).",
+  "engines": {
+    "node": "22.x"
+  },
+  "scripts": {
+    "postinstall": "npm --prefix backend ci --omit=dev",
+    "start": "npm --prefix backend start",
+    "seed": "npm --prefix backend run seed"
+  }
+}
