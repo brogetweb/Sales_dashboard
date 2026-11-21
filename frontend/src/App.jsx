@@ -11,8 +11,18 @@ import {
 } from "recharts";
 import "./App.css";
 
-const API = import.meta.env.VITE_API_URL;
-const api = axios.create({ baseURL: API });
+// VITE_API_URL may be given with or without a trailing "/api" or slash;
+// normalize it so requests always hit "<backend>/api/...".
+const resolveApiUrl = () => {
+  const raw = (import.meta.env.VITE_API_URL || "http://localhost:5000/api")
+    .trim()
+    .replace(/\/+$/, "");
+
+  return raw.endsWith("/api") ? raw : `${raw}/api`;
+};
+
+const API = resolveApiUrl();
+const api = axios.create({ baseURL: API, timeout: 20000 });
 
 const remarks = [
   "Location not suitable",

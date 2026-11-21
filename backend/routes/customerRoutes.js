@@ -9,7 +9,20 @@ const router = express.Router();
 router.use(authMiddleware);
 
 const validMobile = (mobile) =>
-  /^[6-9]\d{9}$/.test(mobile);
+  /^[6-9]\d{9}$/.test(String(mobile || "").trim());
+
+const escapeRegex = (value) =>
+  String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const rejectInvalidId = (req, res, next) => {
+  if (!mongoose.isValidObjectId(req.params.id)) {
+    return res.status(400).json({
+      message: "Invalid customer ID",
+    });
+  }
+
+  next();
+};
 
 const validateCustomer = (body) => {
   if (!body.mobile || !validMobile(body.mobile)) {
@@ -96,10 +109,12 @@ router.get("/", async (req, res) => {
     const filter = {};
 
     if (search) {
+      const pattern = escapeRegex(String(search).trim());
+
       filter.$or = [
-        { mobile: { $regex: search, $options: "i" } },
-        { name: { $regex: search, $options: "i" } },
-        { propertyName: { $regex: search, $options: "i" } },
+        { mobile: { $regex: pattern, $options: "i" } },
+        { name: { $regex: pattern, $options: "i" } },
+        { propertyName: { $regex: pattern, $options: "i" } },
       ];
     }
 
@@ -170,7 +185,7 @@ router.post("/", async (req, res) => {
       });
     }
 
-    const normalizedMobile = mobile.trim();
+    const normalizedMobile = String(mobile).trim();
 
     let customer = await Customer.findOne({
       mobile: normalizedMobile,
@@ -221,7 +236,7 @@ router.post("/", async (req, res) => {
   }
 });
 
-router.put("/:id", async (req, res) => {
+router.put("/:id", rejectInvalidId, async (req, res) => {
   try {
     const customer = await Customer.findById(req.params.id);
 
@@ -249,7 +264,7 @@ router.put("/:id", async (req, res) => {
       });
     }
 
-    if (mobile) customer.mobile = mobile.trim();
+    if (mobile) customer.mobile = String(mobile).trim();
     if (name !== undefined) customer.name = name;
     if (propertyName !== undefined) {
       customer.propertyName = propertyName;
@@ -286,11 +301,17 @@ router.put("/:id", async (req, res) => {
       customer,
     });
   } catch (error) {
+    if (error.code === 11000) {
+      return res.status(409).json({
+        message: "Mobile number already exists",
+      });
+    }
+
     res.status(500).json({ message: error.message });
   }
 });
 
-router.patch("/:id/complete-followup", async (req, res) => {
+router.patch("/:id/complete-followup", rejectInvalidId, async (req, res) => {
   try {
     const customer = await Customer.findById(req.params.id);
 
