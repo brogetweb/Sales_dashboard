@@ -8,6 +8,8 @@ const router = express.Router();
 
 router.use(authMiddleware);
 
+// ---------------- VALIDATIONS ----------------
+
 const validMobile = (mobile) =>
   /^[6-9]\d{9}$/.test(String(mobile || "").trim());
 
@@ -33,12 +35,17 @@ const validateCustomer = (body) => {
     return "Customer remark is required";
   }
 
-  if (body.followUpAt && Number.isNaN(new Date(body.followUpAt).getTime())) {
+  if (
+    body.followUpAt &&
+    Number.isNaN(new Date(body.followUpAt).getTime())
+  ) {
     return "Invalid follow-up date";
   }
 
   return null;
 };
+
+// ---------------- CUSTOMER STATS ----------------
 
 router.get("/stats", async (req, res) => {
   try {
@@ -93,9 +100,13 @@ router.get("/stats", async (req, res) => {
       reasons,
     });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    res.status(500).json({
+      message: error.message,
+    });
   }
 });
+
+// ---------------- GET ALL CUSTOMERS ----------------
 
 router.get("/", async (req, res) => {
   try {
@@ -118,7 +129,9 @@ router.get("/", async (req, res) => {
       ];
     }
 
-    if (status) filter.status = status;
+    if (status) {
+      filter.status = status;
+    }
 
     if (reason) {
       filter["feedbackHistory.remark"] = reason;
@@ -131,7 +144,11 @@ router.get("/", async (req, res) => {
       const end = new Date();
       end.setHours(23, 59, 59, 999);
 
-      filter.followUpAt = { $gte: start, $lte: end };
+      filter.followUpAt = {
+        $gte: start,
+        $lte: end,
+      };
+
       filter.followUpDone = false;
     }
 
@@ -139,7 +156,10 @@ router.get("/", async (req, res) => {
       const start = new Date();
       start.setHours(0, 0, 0, 0);
 
-      filter.followUpAt = { $lt: start };
+      filter.followUpAt = {
+        $lt: start,
+      };
+
       filter.followUpDone = false;
     }
 
@@ -147,7 +167,10 @@ router.get("/", async (req, res) => {
       const end = new Date();
       end.setHours(23, 59, 59, 999);
 
-      filter.followUpAt = { $gt: end };
+      filter.followUpAt = {
+        $gt: end,
+      };
+
       filter.followUpDone = false;
     }
 
@@ -156,9 +179,13 @@ router.get("/", async (req, res) => {
 
     res.json(customers);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    res.status(500).json({
+      message: error.message,
+    });
   }
 });
+
+// ---------------- ADD CUSTOMER / ADD FEEDBACK ----------------
 
 router.post("/", async (req, res) => {
   try {
@@ -199,13 +226,16 @@ router.post("/", async (req, res) => {
 
     if (customer) {
       customer.name = name || customer.name;
+
       customer.propertyName =
         propertyName || customer.propertyName;
 
       customer.feedbackHistory.push(feedback);
+
       customer.status = status || "Follow-up";
       customer.followUpAt = followUpAt || null;
       customer.followUpDone = false;
+
       customer.reminderSentAt = null;
       customer.reminderLastAttemptAt = null;
       customer.reminderError = "";
@@ -236,6 +266,8 @@ router.post("/", async (req, res) => {
   }
 });
 
+// ---------------- UPDATE CUSTOMER ----------------
+
 router.put("/:id", rejectInvalidId, async (req, res) => {
   try {
     const customer = await Customer.findById(req.params.id);
@@ -264,12 +296,21 @@ router.put("/:id", rejectInvalidId, async (req, res) => {
       });
     }
 
-    if (mobile) customer.mobile = String(mobile).trim();
-    if (name !== undefined) customer.name = name;
+    if (mobile) {
+      customer.mobile = String(mobile).trim();
+    }
+
+    if (name !== undefined) {
+      customer.name = name;
+    }
+
     if (propertyName !== undefined) {
       customer.propertyName = propertyName;
     }
-    if (status) customer.status = status;
+
+    if (status) {
+      customer.status = status;
+    }
 
     if (followUpAt !== undefined) {
       const newDate = followUpAt || null;
@@ -280,12 +321,14 @@ router.put("/:id", rejectInvalidId, async (req, res) => {
       ) {
         customer.followUpAt = newDate;
         customer.followUpDone = false;
+
         customer.reminderSentAt = null;
         customer.reminderLastAttemptAt = null;
         customer.reminderError = "";
       }
     }
 
+    // Add a new feedback only when explicitly requested
     if (addFeedback && remark?.trim()) {
       customer.feedbackHistory.push({
         remark: remark.trim(),
@@ -307,42 +350,123 @@ router.put("/:id", rejectInvalidId, async (req, res) => {
       });
     }
 
-    res.status(500).json({ message: error.message });
-  }
-});
-
-router.patch("/:id/complete-followup", rejectInvalidId, async (req, res) => {
-  try {
-    const customer = await Customer.findById(req.params.id);
-
-    if (!customer) {
-      return res.status(404).json({
-        message: "Customer not found",
-      });
-    }
-
-    customer.followUpDone = true;
-    customer.reminderError = "";
-
-    await customer.save();
-
-    res.json({
-      message: "Follow-up completed",
-      customer,
+    res.status(500).json({
+      message: error.message,
     });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
   }
 });
 
-router.delete("/:id", async (req, res) => {
-  try {
-    if (!mongoose.isValidObjectId(req.params.id)) {
-      return res.status(400).json({
-        message: "Invalid customer ID",
+// ---------------- EDIT EXISTING FEEDBACK ----------------
+
+router.patch(
+  "/:id/feedback/:feedbackId",
+  rejectInvalidId,
+  async (req, res) => {
+    try {
+      const { feedbackId } = req.params;
+
+      if (!mongoose.isValidObjectId(feedbackId)) {
+        return res.status(400).json({
+          message: "Invalid feedback ID",
+        });
+      }
+
+      const {
+        remark,
+        otherRemark,
+        feedbackDate,
+      } = req.body;
+
+      if (!remark?.trim()) {
+        return res.status(400).json({
+          message: "Customer remark is required",
+        });
+      }
+
+      if (
+        feedbackDate !== undefined &&
+        Number.isNaN(new Date(feedbackDate).getTime())
+      ) {
+        return res.status(400).json({
+          message: "Invalid feedback date",
+        });
+      }
+
+      const customer = await Customer.findById(req.params.id);
+
+      if (!customer) {
+        return res.status(404).json({
+          message: "Customer not found",
+        });
+      }
+
+      // Find the particular feedback using its subdocument ID
+      const feedback = customer.feedbackHistory.id(feedbackId);
+
+      if (!feedback) {
+        return res.status(404).json({
+          message: "Feedback not found",
+        });
+      }
+
+      // Update existing feedback instead of pushing a new one
+      feedback.remark = remark.trim();
+      feedback.otherRemark = otherRemark || "";
+
+      if (feedbackDate !== undefined) {
+        feedback.feedbackDate = feedbackDate;
+      }
+
+      await customer.save();
+
+      res.json({
+        message: "Feedback updated successfully",
+        customer,
+      });
+    } catch (error) {
+      res.status(500).json({
+        message: error.message,
       });
     }
+  }
+);
 
+// ---------------- COMPLETE FOLLOW-UP ----------------
+
+router.patch(
+  "/:id/complete-followup",
+  rejectInvalidId,
+  async (req, res) => {
+    try {
+      const customer = await Customer.findById(req.params.id);
+
+      if (!customer) {
+        return res.status(404).json({
+          message: "Customer not found",
+        });
+      }
+
+      customer.followUpDone = true;
+      customer.reminderError = "";
+
+      await customer.save();
+
+      res.json({
+        message: "Follow-up completed",
+        customer,
+      });
+    } catch (error) {
+      res.status(500).json({
+        message: error.message,
+      });
+    }
+  }
+);
+
+// ---------------- DELETE CUSTOMER ----------------
+
+router.delete("/:id", rejectInvalidId, async (req, res) => {
+  try {
     const customer = await Customer.findByIdAndDelete(
       req.params.id
     );
@@ -357,7 +481,9 @@ router.delete("/:id", async (req, res) => {
       message: "Customer deleted successfully",
     });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    res.status(500).json({
+      message: error.message,
+    });
   }
 });
 

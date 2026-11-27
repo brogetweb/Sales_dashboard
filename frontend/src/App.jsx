@@ -11,8 +11,7 @@ import {
 } from "recharts";
 import "./App.css";
 
-// VITE_API_URL may be given with or without a trailing "/api" or slash;
-// normalize it so requests always hit "<backend>/api/...".
+// API URL configuration
 const resolveApiUrl = () => {
   const raw = (import.meta.env.VITE_API_URL || "http://localhost:5000/api")
     .trim()
@@ -22,8 +21,12 @@ const resolveApiUrl = () => {
 };
 
 const API = resolveApiUrl();
-const api = axios.create({ baseURL: API, timeout: 20000 });
+const api = axios.create({
+  baseURL: API,
+  timeout: 20000
+});
 
+// Customer remarks
 const remarks = [
   "Location not suitable",
   "Price is too high",
@@ -36,9 +39,23 @@ const remarks = [
   "Other"
 ];
 
-const statuses = ["Follow-up", "Interested", "Not Interested", "Converted"];
-const chartColors = ["#2878ed", "#28ad78", "#f3a43b", "#a66ad5", "#ef7777", "#48a6bd"];
+const statuses = [
+  "Follow-up",
+  "Interested",
+  "Not Interested",
+  "Converted"
+];
 
+const chartColors = [
+  "#2878ed",
+  "#28ad78",
+  "#f3a43b",
+  "#a66ad5",
+  "#ef7777",
+  "#48a6bd"
+];
+
+// Authentication helpers
 const getToken = () => localStorage.getItem("crm_token");
 
 const authConfig = () => ({
@@ -47,11 +64,15 @@ const authConfig = () => ({
   }
 });
 
+// Date helpers
 const dateInput = (value) => {
   if (!value) return "";
 
   const date = new Date(value);
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+
+  const local = new Date(
+    date.getTime() - date.getTimezoneOffset() * 60000
+  );
 
   return local.toISOString().slice(0, 16);
 };
@@ -81,11 +102,14 @@ const formatDate = (value, withTime = false) => {
   );
 };
 
+// Get latest feedback
 const getLatestFeedback = (customer) => {
-  const history = customer.feedbackHistory || [];
+  const history = customer?.feedbackHistory || [];
+
   return history[history.length - 1];
 };
 
+// Follow-up status
 const getReminderState = (customer) => {
   if (customer.followUpDone) return "Completed";
 
@@ -104,6 +128,7 @@ const getReminderState = (customer) => {
   return "Upcoming";
 };
 
+// Initial form values
 const initialForm = () => ({
   name: "",
   mobile: "",
@@ -123,6 +148,7 @@ function App() {
   );
 
   const [page, setPage] = useState("dashboard");
+
   const [customers, setCustomers] = useState([]);
 
   const [stats, setStats] = useState({
@@ -135,16 +161,22 @@ function App() {
   });
 
   const [loading, setLoading] = useState(false);
+
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [followFilter, setFollowFilter] = useState("");
+
   const [editing, setEditing] = useState(null);
+
   const [toast, setToast] = useState("");
+
   const [form, setForm] = useState(initialForm);
+
   const [pageNumber, setPageNumber] = useState(1);
 
   const pageSize = 5;
 
+  // Toast notification
   const notify = (message) => {
     setToast(message);
 
@@ -155,6 +187,7 @@ function App() {
     }, 3000);
   };
 
+  // Fetch customers and dashboard statistics
   const fetchData = useCallback(async () => {
     if (!getToken()) return;
 
@@ -172,8 +205,21 @@ function App() {
           : []
       );
 
-      setStats(statsResponse.data || {});
+      setStats(statsResponse.data || {
+        totalCustomers: 0,
+        today: 0,
+        overdue: 0,
+        upcoming: 0,
+        converted: 0,
+        reasons: {}
+      });
+
     } catch (error) {
+      console.error(
+        "Fetch Dashboard Error:",
+        error.response?.data || error
+      );
+
       if (error.response?.status === 401) {
         localStorage.removeItem("crm_token");
         localStorage.removeItem("crm_username");
@@ -186,11 +232,13 @@ function App() {
           "Unable to load dashboard"
         );
       }
+
     } finally {
       setLoading(false);
     }
   }, []);
 
+  // Initial fetch and automatic refresh every 30 seconds
   useEffect(() => {
     if (!token) return;
 
@@ -201,6 +249,7 @@ function App() {
     return () => window.clearInterval(interval);
   }, [token, fetchData]);
 
+  // Login
   const login = async (event) => {
     event.preventDefault();
 
@@ -218,21 +267,36 @@ function App() {
 
       setToken(response.data.token);
       setUsername(response.data.username);
+
+      notify("Login successful");
+
     } catch (error) {
+      console.error(
+        "Login Error:",
+        error.response?.data || error
+      );
+
       notify(
-        error.response?.data?.message || "Login failed"
+        error.response?.data?.message ||
+        "Login failed"
       );
     }
   };
 
+  // Logout
   const logout = () => {
     localStorage.removeItem("crm_token");
     localStorage.removeItem("crm_username");
 
     setToken(null);
     setUsername("");
+
+    setCustomers([]);
+    setEditing(null);
+    setForm(initialForm());
   };
 
+  // Start adding a new customer remark
   const startNewRemark = () => {
     setEditing(null);
     setForm(initialForm());
@@ -244,6 +308,7 @@ function App() {
     });
   };
 
+  // Open customer edit form
   const openEditForm = (customer) => {
     const latest = getLatestFeedback(customer);
 
@@ -270,46 +335,82 @@ function App() {
     });
   };
 
+  // SAVE CUSTOMER / UPDATE EXISTING FEEDBACK
   const saveCustomer = async (event) => {
     event.preventDefault();
 
     try {
-      const payload = {
-        ...form,
-        mobile: form.mobile.trim(),
-        followUpAt: form.followUpAt
-          ? new Date(form.followUpAt).toISOString()
-          : null
-      };
+      const followUpDate = form.followUpAt
+        ? new Date(form.followUpAt).toISOString()
+        : null;
 
       if (editing) {
+        // Find the latest feedback
+        const latestFeedback = getLatestFeedback(editing);
+
+        // Check whether feedback ID exists
+        if (!latestFeedback?._id) {
+          notify(
+            "Feedback ID not found. Please refresh the dashboard."
+          );
+
+          return;
+        }
+
+        // STEP 1: Update existing feedback
+        await api.patch(
+          `/customers/${editing._id}/feedback/${latestFeedback._id}`,
+          {
+            remark: form.remark,
+            otherRemark: form.otherRemark,
+            feedbackDate: form.feedbackDate
+          },
+          authConfig()
+        );
+
+        // STEP 2: Update customer status and follow-up
         await api.put(
           `/customers/${editing._id}`,
           {
-            ...payload,
+            status: form.status,
+            followUpAt: followUpDate,
             addFeedback: false
           },
           authConfig()
         );
+
+        notify("Customer feedback updated successfully!");
+
       } else {
+        // ADD NEW CUSTOMER OR NEW FEEDBACK
+        const payload = {
+          ...form,
+          mobile: form.mobile.trim(),
+          followUpAt: followUpDate
+        };
+
         await api.post(
           "/customers",
           payload,
           authConfig()
         );
+
+        notify("Customer remark saved successfully!");
       }
 
+      // Reset form
       setEditing(null);
       setForm(initialForm());
 
+      // Refresh dashboard data
       await fetchData();
 
-      notify(
-        editing
-          ? "Customer updated successfully"
-          : "Customer remark saved successfully"
-      );
     } catch (error) {
+      console.error(
+        "Save Customer Error:",
+        error.response?.data || error
+      );
+
       notify(
         error.response?.data?.message ||
         "Unable to save customer"
@@ -317,6 +418,7 @@ function App() {
     }
   };
 
+  // Delete customer
   const deleteCustomer = async (id) => {
     if (!window.confirm("Delete this customer record?")) return;
 
@@ -329,13 +431,21 @@ function App() {
       await fetchData();
 
       notify("Customer deleted");
+
     } catch (error) {
+      console.error(
+        "Delete Customer Error:",
+        error.response?.data || error
+      );
+
       notify(
-        error.response?.data?.message || "Delete failed"
+        error.response?.data?.message ||
+        "Delete failed"
       );
     }
   };
 
+  // Complete follow-up
   const completeFollowUp = async (id) => {
     try {
       await api.patch(
@@ -347,7 +457,13 @@ function App() {
       await fetchData();
 
       notify("Follow-up completed");
+
     } catch (error) {
+      console.error(
+        "Complete Follow-up Error:",
+        error.response?.data || error
+      );
+
       notify(
         error.response?.data?.message ||
         "Unable to complete follow-up"
@@ -355,6 +471,7 @@ function App() {
     }
   };
 
+  // Filter customers
   const filteredCustomers = useMemo(() => {
     return customers.filter((customer) => {
       const latest = getLatestFeedback(customer);
@@ -381,6 +498,7 @@ function App() {
     });
   }, [customers, search, statusFilter, followFilter]);
 
+  // Reset pagination when filters change
   useEffect(() => {
     setPageNumber(1);
   }, [search, statusFilter, followFilter, page]);
@@ -395,6 +513,7 @@ function App() {
     Math.ceil(filteredCustomers.length / pageSize)
   );
 
+  // Remark analytics
   const reasonData = useMemo(() => {
     return Object.entries(stats.reasons || {})
       .map(([name, count]) => ({
@@ -405,6 +524,7 @@ function App() {
       .sort((a, b) => b.count - a.count);
   }, [stats.reasons]);
 
+  // Today's and overdue follow-ups
   const todayFollowups = useMemo(() => {
     return customers
       .filter(
@@ -419,6 +539,7 @@ function App() {
       .slice(0, 4);
   }, [customers]);
 
+  // Recent activity
   const recentActivity = useMemo(() => {
     return customers
       .flatMap((customer) => {
@@ -440,6 +561,7 @@ function App() {
       .slice(0, 4);
   }, [customers]);
 
+  // Export CSV
   const exportCSV = () => {
     const headers = [
       "Name",
@@ -489,6 +611,7 @@ function App() {
     URL.revokeObjectURL(url);
   };
 
+  // Sidebar navigation
   const navigation = [
     {
       id: "dashboard",
@@ -522,6 +645,7 @@ function App() {
     }
   ];
 
+  // Login screen
   if (!token) {
     return (
       <div className="login-screen">
@@ -532,6 +656,7 @@ function App() {
           <p>Customer CRM</p>
 
           <label>Username</label>
+
           <input
             name="username"
             required
@@ -540,6 +665,7 @@ function App() {
           />
 
           <label>Password</label>
+
           <input
             name="password"
             type="password"
@@ -558,6 +684,7 @@ function App() {
     );
   }
 
+  // Customer table
   const renderCustomerTable = (list) => (
     <div className="table-wrap">
       <table>
@@ -600,9 +727,13 @@ function App() {
                   )}
                 </td>
 
-                <td>{formatDate(latest?.feedbackDate)}</td>
+                <td>
+                  {formatDate(latest?.feedbackDate)}
+                </td>
 
-                <td>{formatDate(customer.followUpAt)}</td>
+                <td>
+                  {formatDate(customer.followUpAt)}
+                </td>
 
                 <td>
                   <span
@@ -666,6 +797,7 @@ function App() {
     </div>
   );
 
+  // Customer add/edit form
   const customerForm = (
     <form className="remark-form" onSubmit={saveCustomer}>
       <div className="panel-title">
@@ -832,18 +964,22 @@ function App() {
 
         <button className="primary-btn save-btn">
           <Save size={16} />
+
           {editing ? "Save Changes" : "Save Remark"}
         </button>
       </div>
     </form>
   );
 
+  // Main dashboard
   return (
     <div className="app-layout">
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">⌂</div>
+
           <h2>BuilderBroget</h2>
+
           <span>Customer CRM</span>
         </div>
 
@@ -862,6 +998,7 @@ function App() {
               }}
             >
               <Icon size={19} />
+
               <span>{label}</span>
 
               {id === "followups" &&
@@ -934,43 +1071,46 @@ function App() {
           </div>
         )}
 
+        {/* DASHBOARD PAGE */}
         {page === "dashboard" && (
           <>
             <section className="stats-grid">
               <StatCard
                 title="Total Customers"
-                value={stats.totalCustomers || customers.length}
+                value={stats.totalCustomers ?? customers.length}
                 icon={<Users />}
                 tone="blue"
               />
 
               <StatCard
                 title="Follow-ups Today"
-                value={stats.today || 0}
+                value={stats.today ?? 0}
                 icon={<Phone />}
                 tone="green"
               />
 
               <StatCard
                 title="Pending Follow-ups"
-                value={(stats.upcoming || 0) + (stats.overdue || 0)}
+                value={(stats.upcoming ?? 0) + (stats.overdue ?? 0)}
                 icon={<Clock />}
                 tone="orange"
               />
 
               <StatCard
                 title="Converted Customers"
-                value={stats.converted || 0}
+                value={stats.converted ?? 0}
                 icon={<CheckCircle />}
                 tone="mint"
               />
             </section>
 
             <section className="dashboard-grid">
+              {/* CUSTOMER FORM */}
               <div className="panel form-panel">
                 {customerForm}
               </div>
 
+              {/* TODAY'S FOLLOW-UPS */}
               <div className="panel todays-panel">
                 <div className="panel-heading">
                   <div className="panel-title">
@@ -998,6 +1138,7 @@ function App() {
 
                         <div className="today-info">
                           <strong>{customer.mobile}</strong>
+
                           <p>
                             {latest?.remark || "Follow-up required"}
                           </p>
@@ -1042,6 +1183,7 @@ function App() {
                 </button>
               </div>
 
+              {/* REMARK ANALYTICS */}
               <div className="panel analytics-panel">
                 <div className="panel-heading">
                   <div className="panel-title">
@@ -1085,8 +1227,9 @@ function App() {
 
                   <div className="donut-center">
                     <strong>
-                      {stats.totalCustomers || customers.length}
+                      {stats.totalCustomers ?? customers.length}
                     </strong>
+
                     <span>Total</span>
                   </div>
                 </div>
@@ -1101,6 +1244,7 @@ function App() {
                               chartColors[index % chartColors.length]
                           }}
                         />
+
                         {item.name}
                       </span>
 
@@ -1129,6 +1273,7 @@ function App() {
                 </div>
               </div>
 
+              {/* CUSTOMER LIST */}
               <div className="panel customer-list-panel">
                 <div className="panel-heading customer-list-heading">
                   <div className="panel-title">
@@ -1238,6 +1383,7 @@ function App() {
                 </div>
               </div>
 
+              {/* RECENT ACTIVITY */}
               <div className="panel activity-panel">
                 <div className="panel-heading">
                   <div className="panel-title">
@@ -1258,9 +1404,11 @@ function App() {
 
                       <div>
                         <strong>{item.text}</strong>
+
                         <p>
                           {item.mobile} · {item.detail}
                         </p>
+
                         <small>
                           {formatDate(item.date, true)}
                         </small>
@@ -1279,6 +1427,7 @@ function App() {
           </>
         )}
 
+        {/* CUSTOMERS PAGE */}
         {page === "customers" && (
           <section className="panel page-panel">
             <div className="panel-heading">
@@ -1353,6 +1502,7 @@ function App() {
           </section>
         )}
 
+        {/* FOLLOW-UPS PAGE */}
         {page === "followups" && (
           <section className="panel page-panel">
             <div className="panel-heading">
@@ -1383,6 +1533,7 @@ function App() {
           </section>
         )}
 
+        {/* CALENDAR PAGE */}
         {page === "calendar" && (
           <section className="panel page-panel">
             <div className="panel-heading">
@@ -1416,6 +1567,7 @@ function App() {
 
                     <div>
                       <strong>{c.mobile}</strong>
+
                       <p>
                         {getLatestFeedback(c)?.remark || "Follow-up"}
                       </p>
@@ -1441,19 +1593,20 @@ function App() {
           </section>
         )}
 
+        {/* REPORTS PAGE */}
         {page === "reports" && (
           <>
             <section className="stats-grid report-stats">
               <StatCard
                 title="Total Customers"
-                value={stats.totalCustomers || customers.length}
+                value={stats.totalCustomers ?? customers.length}
                 icon={<Users />}
                 tone="blue"
               />
 
               <StatCard
                 title="Converted"
-                value={stats.converted || 0}
+                value={stats.converted ?? 0}
                 icon={<CheckCircle />}
                 tone="mint"
               />
@@ -1463,7 +1616,7 @@ function App() {
                 value={`${
                   customers.length
                     ? (
-                        ((stats.converted || 0) /
+                        ((stats.converted ?? 0) /
                           customers.length) *
                         100
                       ).toFixed(1)
@@ -1518,6 +1671,7 @@ function App() {
           </>
         )}
 
+        {/* SETTINGS PAGE */}
         {page === "settings" && (
           <section className="panel page-panel">
             <div className="panel-heading">
@@ -1557,6 +1711,7 @@ function App() {
   );
 }
 
+// Statistics card component
 function StatCard({ title, value, icon, tone }) {
   return (
     <div className={`stat-card ${tone}`}>
